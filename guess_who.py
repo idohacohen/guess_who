@@ -39,10 +39,14 @@ class AnalyzeNetwork:
             packet_info['IP'] = packet[IP].src
             packet_info['protocol'] = packet[IP].proto
             packet_info['ttl'] = packet[IP].ttl
+            packet_info['size'] = packet[IP].len
+            packet_info['flags'] = packet[IP].flags.value
         else:
             packet_info['IP'] = 'Unknown'
             packet_info['protocol'] = 'Unknown'
             packet_info['ttl'] = 'Unknown'
+            packet_info['size'] = 'Unknown'
+            packet_info['flags'] = 'Unknown'
         return packet_info
     
 
@@ -93,16 +97,47 @@ class AnalyzeNetwork:
         return info
     
 
+    def guess_os_by_ttl(self, ttl: int) -> str:
+        """returns the most likely OS given a TTL value"""
+        if 0 <= ttl <= 64:
+            return 'Linux'
+        elif 65 <= ttl <= 128:
+            return 'Windows'
+        elif 129 <= ttl <= 255:
+            return 'network device'
+        else:
+            return 'Unknown'
+        
+    def guess_os_by_size(self, size: int) -> str:
+        """returns the most likely OS given a packet size"""
+        if size == 60:
+            return 'Windows'
+        elif size == 84:
+            return 'Linux'
+        else:
+            return 'Unknown'
+        
+    
+    def guess_os_by_flags(self, flags: str) -> str:
+        """returns the most likely OS given a packet's flags"""
+        if flags == 0:
+            return 'Windows'
+        elif flags == 2:
+            return 'Linux'
+        else:
+            return 'Unknown'
+
+
     def guess_os(self, device_info: Dict[str, str]) -> str:
         """returns the most likely OS of a device given its info"""
-        if device_info['ttl'] == 'Unknown':
-            return 'Unknown'
-        elif device_info['ttl'] <= 64:
-            return 'Linux/MacOS'
-        elif device_info['ttl'] <= 128:
-            return 'Windows'
-        else:
-            return 'net device'
+        if device_info['size'] != 'Unknown':
+            ret = self.guess_os_by_size(int(device_info['size']))
+        if device_info['flags'] != 'Unknown' and ret == 'Unknown':
+            ret = self.guess_os_by_flags(int(device_info['flags']))
+        if device_info['ttl'] != 'Unknown' and ret == 'Unknown':
+            ret = self.guess_os_by_ttl(int(device_info['ttl']))
+        return ret
+        
         
 
 
@@ -116,7 +151,7 @@ class AnalyzeNetwork:
 
 
 if __name__ == '__main__':
-    pcap_path = 'pcap-01.pcapng'
+    pcap_path = 'pcap-02.pcapng'
     network = AnalyzeNetwork(pcap_path)
     print(network)
     print(network.guess_os(network.get_info()[0]))
