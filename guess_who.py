@@ -1,11 +1,13 @@
 from scapy.all import *
 import requests
-from scapy.layers.inet import IP, UDP, TCP, ICMP
+from scapy.layers.inet import IP, TCP
 from scapy.layers.l2 import Ether
 from typing import List, Dict
+from time import sleep
 
 
 class AnalyzeNetwork:
+    counter = 0
     def __init__(self, pcap_path: str) -> None:
         """
         pcap_path (string): path to a pcap file
@@ -19,6 +21,7 @@ class AnalyzeNetwork:
         """returns the vendor of a device given its MAC address"""
         mac = mac.replace(':', '')
         url = f'https://api.macvendors.com/{mac}'
+        sleep(1) # to avoid getting blocked
         response = requests.get(url)
         if response.status_code == 200:
             return response.text
@@ -27,14 +30,14 @@ class AnalyzeNetwork:
 
 
     @staticmethod
-    def get_packet_info(packet: Packet) -> Dict[str, str]:
+    def get_packet_info(packet: Packet, check_vendor: bool) -> Dict[str, str]:
         """returns a dict with information about a device given a packet"""
         packet_info = {}
-        if Ether in packet:
+        AnalyzeNetwork.counter += 1
+        if check_vendor:
             packet_info['MAC'] = packet[Ether].src
             packet_info['Vendor'] = AnalyzeNetwork.get_vendor(packet[Ether].src)
-        else:
-            packet_info['MAC'] = 'Unknown'
+
         if IP in packet:
             packet_info['IP'] = packet[IP].src
             packet_info['protocol'] = packet[IP].proto
@@ -47,6 +50,15 @@ class AnalyzeNetwork:
             packet_info['ttl'] = 'Unknown'
             packet_info['size'] = 'Unknown'
             packet_info['flags'] = 'Unknown'
+
+        if TCP in packet and packet[TCP].payload:
+            if "HTTP" in str(packet[TCP].payload.load):
+                data = packet[TCP].payload.load.decode('utf-8').split('\r\n')[1:]
+                for line in data:
+                    if line.startswith('User-Agent:'):
+                        packet_info['program'] = line.split(': ')[1]
+                    if line.startswith('Server:'):
+                        packet_info['program'] = line.split(': ')[1]
         return packet_info
     
 
@@ -77,7 +89,7 @@ class AnalyzeNetwork:
             given MAC address"""
         for packet in self.pcap:
             if Ether in packet and packet[Ether].src == mac:
-                return self.get_packet_info(packet)
+                return self.get_packet_info(packet, True)
 
 
     def get_info_by_ip(self, ip : str) -> Dict[str, str] | None:
@@ -85,15 +97,19 @@ class AnalyzeNetwork:
         given IP address"""
         for packet in self.pcap:
             if IP in packet and packet[IP].src == ip:
-                return self.get_packet_info(packet)
+                return self.get_packet_info(packet, True)
 
 
     def get_info(self) -> List[Dict[str, str]]:
         """returns a list of dicts with information about every
         device in the pcap"""
         info = []
+        macs = self.get_macs()
+        for mac in macs: # finding vendor takes a long time so we only do it once
+            info.append(self.get_info_by_mac(mac))
         for packet in self.pcap:
-            info.append(self.get_packet_info(packet))
+            mac_index = macs.index(packet[Ether].src)
+            info[mac_index].update(self.get_packet_info(packet, False))
         return info
     
 
@@ -130,6 +146,7 @@ class AnalyzeNetwork:
 
     def guess_os(self, device_info: Dict[str, str]) -> str:
         """returns the most likely OS of a device given its info"""
+        ret = 'Unknown'
         if device_info['size'] != 'Unknown':
             ret = self.guess_os_by_size(int(device_info['size']))
         if device_info['flags'] != 'Unknown' and ret == 'Unknown':
@@ -142,7 +159,7 @@ class AnalyzeNetwork:
 
 
     def __repr__(self) -> str:
-        return str(self)
+        return str(self).replace('\n', ',')
 
 
     def __str__(self) -> str:
@@ -151,8 +168,6 @@ class AnalyzeNetwork:
 
 
 if __name__ == '__main__':
-    pcap_path = 'pcap-02.pcapng'
+    pcap_path = 'pcap-03.pcapng'
     network = AnalyzeNetwork(pcap_path)
     print(network)
-    print(network.guess_os(network.get_info()[0]))
-    print(network.guess_os(network.get_info()[1]))
